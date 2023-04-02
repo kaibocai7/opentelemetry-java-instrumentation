@@ -51,7 +51,7 @@ public abstract class AbstractRxJava3Test {
   private static final String ADD_ONE = "addOne";
   private static final String ADD_TWO = "addTwo";
 
-  private static Stream<Arguments> provideParameters() {
+  private static Stream<Arguments> schedulers() {
     return Stream.of(
         Arguments.of(Schedulers.newThread()),
         Arguments.of(Schedulers.computation()),
@@ -74,15 +74,14 @@ public abstract class AbstractRxJava3Test {
   private void createParentSpan(ThrowingRunnable<RuntimeException> test) {
     testing().runWithSpan(PARENT, test);
   }
-  //  private <T> T createParentSpan(ThrowingSupplier<T, RuntimeException> test) {
-  //    OpenTelemetry.
-  //  }
 
   private enum CancellingSubscriber implements Subscriber<Object> {
     INSTANCE;
 
     @Override
-    public void onSubscribe(Subscription subscription) {}
+    public void onSubscribe(Subscription subscription) {
+      subscription.cancel();
+    }
 
     @Override
     public void onNext(Object o) {}
@@ -503,7 +502,9 @@ public abstract class AbstractRxJava3Test {
 
   @Test
   public void basicMaybeCancel() {
-    createParentSpan(() -> Maybe.just(1).toFlowable().subscribe(CancellingSubscriber.INSTANCE));
+    createParentSpan(
+        () ->
+            Maybe.just(1).map(this::addOne).toFlowable().subscribe(CancellingSubscriber.INSTANCE));
     testing()
         .waitAndAssertTraces(
             trace ->
@@ -527,7 +528,9 @@ public abstract class AbstractRxJava3Test {
 
   @Test
   public void basicSingleCancel() {
-    createParentSpan(() -> Single.just(1).toFlowable().subscribe(CancellingSubscriber.INSTANCE));
+    createParentSpan(
+        () ->
+            Single.just(1).map(this::addOne).toFlowable().subscribe(CancellingSubscriber.INSTANCE));
     testing()
         .waitAndAssertTraces(
             trace ->
@@ -554,6 +557,7 @@ public abstract class AbstractRxJava3Test {
     createParentSpan(
         () ->
             Observable.just(1)
+                .map(this::addOne)
                 .toFlowable(BackpressureStrategy.LATEST)
                 .subscribe(CancellingSubscriber.INSTANCE));
     testing()
@@ -632,9 +636,8 @@ public abstract class AbstractRxJava3Test {
   // Publisher chain spans have the correct parents from subscription time
   @Test
   public void maybeChainParentSpan() {
-    testing()
-        .runWithSpan(
-            "trace-parent", () -> Maybe.just(42).map(this::addOne).map(this::addTwo).blockingGet());
+    Maybe<Integer> maybe = Maybe.just(42).map(this::addOne).map(this::addTwo);
+    testing().runWithSpan("trace-parent", () -> maybe.blockingGet());
     testing()
         .waitAndAssertTraces(
             trace ->
@@ -651,7 +654,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @Test
-  public void maybeChainHasAssemblyContext() {
+  public void maybeChainHasSubscriptionContext() {
     Integer result =
         createParentSpan(
             () -> {
@@ -681,7 +684,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @Test
-  public void flowableChainHasAssemblyContext() {
+  public void flowableChainHasSubscriptionContext() {
     List<Integer> result =
         createParentSpan(
             () -> {
@@ -721,7 +724,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @Test
-  public void singleChainHasAssemblyContext() {
+  public void singleChainHasSubscriptionContext() {
     Integer result =
         createParentSpan(
             () -> {
@@ -751,7 +754,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @Test
-  public void observableChainHasAssemblyContext() {
+  public void observableChainHasSubscriptionContext() {
     List<Integer> result =
         createParentSpan(
             () -> {
@@ -782,7 +785,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @ParameterizedTest
-  @MethodSource("provideParameters")
+  @MethodSource("schedulers")
   public void flowableMultiResults(Scheduler scheduler) {
     List<Integer> result =
         testing()
@@ -822,7 +825,7 @@ public abstract class AbstractRxJava3Test {
   }
 
   @ParameterizedTest
-  @MethodSource("provideParameters")
+  @MethodSource("schedulers")
   public void maybeMultipleTraceChains(Scheduler scheduler) {
     int iterations = 100;
     RxJava3ConcurrencyTestHelper.launchAndWait(scheduler, iterations, 60000, testRunner());

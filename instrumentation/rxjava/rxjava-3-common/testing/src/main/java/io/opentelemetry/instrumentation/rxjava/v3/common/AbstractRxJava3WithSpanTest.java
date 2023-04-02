@@ -74,6 +74,8 @@ public abstract class AbstractRxJava3WithSpanTest {
     Thread.sleep(500);
     List<List<SpanData>> traces = testRunner().traces();
     assertThat(traces).isEmpty();
+    List<List<SpanData>> traces1 = testing().waitForTraces(0);
+    assertThat(traces1).isEmpty();
 
     source.onComplete();
     observer.assertComplete();
